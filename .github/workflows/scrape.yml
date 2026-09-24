@@ -1,4 +1,4 @@
-name: Gradescope Scraper
+name: Earlybird Reminder
 
 permissions:
   contents: read
