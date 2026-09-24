@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import smtplib
+import ssl
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -28,7 +30,7 @@ class ReminderConfig:
         """Read environment variables first, then the optional local config file."""
         env = os.environ if environ is None else environ
         custom_path = env.get("REMINDER_CONFIG", "").strip()
-        config_path = Path(custom_path) if custom_path else Path(__file__).resolve().parent.parent / "config.json"
+        config_path = Path(custom_path) if custom_path else Path(__file__).resolve().with_name("config.json")
         file_config = {}
 
         if custom_path or config_path.exists():
@@ -74,12 +76,23 @@ class PlatformScraper(ABC):
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36"
+            ),
         })
         retry_strategy = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
+
+    def GetPage(self, url: str) -> requests.Response:
+        try:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            raise RuntimeError(f"请求页面失败: {url}: {exc}") from exc
 
     @abstractmethod
     def Login(self, username: str, password: str) -> bool:
@@ -95,12 +108,16 @@ class GradescopeScraper(PlatformScraper):
     login_url = f"{base_url}/login"
     account_url = f"{base_url}/account"
 
+    def __init__(self):
+        super().__init__()
+        self.assignment_table_count = 0
+
     def Login(self, email: str, password: str) -> bool:
         print("[Gradescope] 正在登录...")
-        # TODO: Recheck this redirect check if Gradescope changes its login flow.
+        # Recheck this redirect check if Gradescope changes its login flow.
         try:
-            response = self.session.get(self.login_url)
-        except requests.RequestException as exc:
+            response = self.GetPage(self.login_url)
+        except RuntimeError as exc:
             print(f"访问登录页面失败: {exc}")
             return False
 
@@ -118,7 +135,8 @@ class GradescopeScraper(PlatformScraper):
         }
 
         try:
-            response = self.session.post(self.login_url, data=payload)
+            response = self.session.post(self.login_url, data=payload, timeout=15)
+            response.raise_for_status()
         except requests.RequestException as exc:
             print(f"登录失败: {exc}")
             return False
@@ -133,52 +151,92 @@ class GradescopeScraper(PlatformScraper):
 
     def FetchUnsubmittedAssignments(self) -> list[Assignment]:
         print("[Gradescope] 正在抓取未交作业...")
-        # TODO: Recheck course selectors when Gradescope changes its HTML.
-        try:
-            response = self.session.get(self.account_url)
-        except requests.RequestException as exc:
-            print(f"获取账户主页失败: {exc}")
-            return []
+        # Recheck course selectors when Gradescope changes its HTML.
+        response = self.GetPage(self.account_url)
+        if response.url.startswith(self.login_url):
+            raise RuntimeError("Gradescope 登录状态已失效。")
 
         assignments = []
         soup = BeautifulSoup(response.text, "html.parser")
-        for course_list in soup.select(".courseList"):
-            term_tag = course_list.select_one(".courseList--term")
-            term = term_tag.get_text(strip=True) if term_tag else "Unknown Term"
-            for course_tag in course_list.select("a.courseBox[href^='/courses/']"):
+        course_lists = [tag for tag in soup.select(".courseList") if tag.find_parent(class_="courseList") is None]
+        if not course_lists:
+            raise RuntimeError("账户页面没有课程列表，无法确认是否存在未交作业。")
+
+        term_groups = []
+        for course_list in course_lists:
+            course_tags = None
+            for element in course_list.select(".courseList--term, a.courseBox[href^='/courses/']"):
+                if "courseList--term" in element.get_attribute_list("class"):
+                    course_tags = []
+                    term_groups.append((element.get_text(strip=True), course_tags))
+                else:
+                    if course_tags is None:
+                        course_tags = []
+                        term_groups.append(("Unknown Term", course_tags))
+                    course_tags.append(element)
+
+        if not term_groups:
+            raise RuntimeError("账户页面没有可解析的课程，无法确认是否存在未交作业。")
+        if any(term == "Unknown Term" and course_tags for term, course_tags in term_groups):
+            raise RuntimeError("存在未标注学期的课程，无法保证只检查最新学期。")
+
+        ranked_groups = []
+        season_order = {"winter": 1, "spring": 2, "summer": 3, "fall": 4, "autumn": 4}
+        for term, course_tags in term_groups:
+            year_match = re.search(r"(?<!\d)(?:19|20)\d{2}(?!\d)", term)
+            season_match = re.search(r"Winter|Spring|Summer|Fall|Autumn", term, re.IGNORECASE)
+            term_key = None
+            if year_match and season_match:
+                term_key = (int(year_match.group()), season_order[season_match.group().lower()])
+            ranked_groups.append((term, term_key, course_tags))
+
+        # Use the displayed order when term labels cannot be compared.
+        known_keys = [term_key for _, term_key, _ in ranked_groups if term_key is not None]
+        if len(known_keys) == len(ranked_groups):
+            latest_key = max(known_keys)
+            latest_groups = [group for group in ranked_groups if group[1] == latest_key]
+        else:
+            latest_groups = [ranked_groups[0]]
+
+        selected_terms = ", ".join(dict.fromkeys(term for term, _, _ in latest_groups))
+        print(f"最新学期：{selected_terms}")
+        if not any(course_tags for _, _, course_tags in latest_groups):
+            raise RuntimeError("最新学期没有课程，未检查历史学期。")
+        course_count = 0
+        self.assignment_table_count = 0
+        for term, _, course_tags in latest_groups:
+            for course_tag in course_tags:
+                course_count += 1
                 name_tag = course_tag.find("div", class_="courseBox--name")
                 course_name = name_tag.get_text(strip=True) if name_tag else course_tag.get_text(strip=True)
                 course_url = f"{self.base_url}{course_tag.get('href')}"
                 assignments.extend(self.FetchAssignmentsForCourse(f"{course_name} - {term}", course_url))
                 time.sleep(0.1)
 
+        print(f"已检查 {course_count} 门课程，其中 {self.assignment_table_count} 门有作业表。")
         return assignments
 
     def FetchAssignmentsForCourse(self, course_name: str, course_url: str) -> list[Assignment]:
-        # TODO: Recheck assignment and deadline selectors when Gradescope changes its HTML.
-        try:
-            response = self.session.get(course_url)
-        except requests.RequestException as exc:
-            print(f"查找课程主页失败: {exc}")
-            return []
+        # Recheck assignment and deadline selectors when Gradescope changes its HTML.
+        response = self.GetPage(course_url)
+        if response.url.startswith(self.login_url):
+            raise RuntimeError("Gradescope 登录状态已失效。")
 
         soup = BeautifulSoup(response.text, "html.parser")
         table_body = soup.select_one("table#assignments-student-table tbody")
         if table_body is None:
-            return []
+            raise RuntimeError(f"课程页面没有可解析的作业表: {course_url}")
+        self.assignment_table_count += 1
 
         unsubmitted_assignments = []
         now = datetime.now(timezone.utc)
         for row in table_body.find_all("tr", recursive=False):
             name_tag = row.find("th", scope="row")
-            if name_tag is None:
-                continue
-
             cells = row.find_all("td")
-            if not cells:
-                continue
-            status_text = cells[0].get_text(strip=True)
-            if "No Submission" not in status_text:
+            if name_tag is None or not cells:
+                raise RuntimeError(f"课程作业表存在无法解析的行: {course_url}")
+            status_text = cells[0].get_text(" ", strip=True)
+            if "no submission" not in status_text.casefold():
                 continue
 
             link_tag = name_tag.find("a")
@@ -190,15 +248,16 @@ class GradescopeScraper(PlatformScraper):
 
             for time_tag in row.find_all("time", class_="submissionTimeChart--dueDate"):
                 date_string = time_tag.get("datetime")
-                if not isinstance(date_string, str):
-                    continue
+                if not isinstance(date_string, str) or not date_string.strip():
+                    raise RuntimeError(f"课程作业截止时间标签缺少 datetime: {course_url}")
                 try:
                     normalized_date = date_string.strip().replace(" ", "T", 1).replace(" ", "")
-                    if "+" in normalized_date and normalized_date[-3] != ":":
-                        normalized_date = f"{normalized_date[:-2]}:{normalized_date[-2:]}"
-                    parsed_dates.append((datetime.fromisoformat(normalized_date), time_tag.get_text(strip=True)))
+                    parsed_date = datetime.fromisoformat(normalized_date)
                 except ValueError as exc:
-                    print(f"    [警告] 解析日期失败 '{date_string}': {exc}")
+                    raise RuntimeError(f"无法解析作业截止时间: {date_string}") from exc
+                if parsed_date.tzinfo is None:
+                    raise RuntimeError(f"作业截止时间缺少时区: {date_string}")
+                parsed_dates.append((parsed_date, time_tag.get_text(strip=True)))
 
             if parsed_dates:
                 # Gradescope may show both regular and late deadlines; use the latest one.
@@ -234,7 +293,6 @@ class EmailNotifier(BaseNotifier):
         "qq.com": ("smtp.qq.com", 465, True),
         "foxmail.com": ("smtp.qq.com", 465, True),
         "gmail.com": ("smtp.gmail.com", 465, True),
-        "outlook.com": ("smtp.office365.com", 587, False),
         "163.com": ("smtp.163.com", 465, True),
     }
 
@@ -245,6 +303,8 @@ class EmailNotifier(BaseNotifier):
 
     def GuessSmtpConfig(self) -> tuple[str, int, bool]:
         domain = self.sender_email.rsplit("@", 1)[-1].lower()
+        if domain in {"outlook.com", "hotmail.com", "live.com"}:
+            raise ValueError("微软邮箱发信需要 OAuth2，当前 SMTP 登录方式不支持。")
         if domain in self.smtp_config_map:
             return self.smtp_config_map[domain]
         print(f"[警告] 未知邮箱后缀 @{domain}，默认尝试 smtp.{domain}:465")
@@ -255,7 +315,6 @@ class EmailNotifier(BaseNotifier):
             print("没有需要通知的作业。")
             return True
 
-        host, port, use_ssl = self.GuessSmtpConfig()
         lines = [f"共发现未提交作业 {len(assignments)} 项：\n"]
         for index, assignment in enumerate(assignments, start=1):
             lines.extend([
@@ -272,21 +331,32 @@ class EmailNotifier(BaseNotifier):
         message["From"] = self.sender_email
         message["To"] = self.receiver_email
         message.set_content("\n".join(lines))
+        return self.SendMessage(message)
 
+    def SendMessage(self, message: EmailMessage) -> bool:
+        try:
+            host, port, use_ssl = self.GuessSmtpConfig()
+        except ValueError as exc:
+            print(f"邮件配置错误: {exc}")
+            return False
+
+        server = None
         try:
             if use_ssl:
-                server = smtplib.SMTP_SSL(host, port, timeout=15)
+                server = smtplib.SMTP_SSL(host, port, timeout=15, context=ssl.create_default_context())
             else:
                 server = smtplib.SMTP(host, port, timeout=15)
-                server.starttls()
+                server.starttls(context=ssl.create_default_context())
             server.login(self.sender_email, self.sender_auth_code)
             server.send_message(message)
-            server.quit()
             print(f"邮件已成功发送至 {self.receiver_email}")
             return True
         except (OSError, smtplib.SMTPException) as exc:
             print(f"邮件发送失败: {exc}")
             return False
+        finally:
+            if server is not None:
+                server.close()
 
 
 def main() -> int:
@@ -296,18 +366,27 @@ def main() -> int:
         print(f"配置错误: {exc}")
         return 2
 
+    notifier = EmailNotifier(config.sender_email, config.sender_auth_code, config.receiver_email)
+    try:
+        notifier.GuessSmtpConfig()
+    except ValueError as exc:
+        print(f"邮件配置错误: {exc}")
+        return 2
     scraper = GradescopeScraper()
     if not scraper.Login(config.gradescope_email, config.gradescope_password):
         print("Gradescope 登录失败。")
         return 1
 
-    assignments = scraper.FetchUnsubmittedAssignments()
+    try:
+        assignments = scraper.FetchUnsubmittedAssignments()
+    except RuntimeError as exc:
+        print(f"抓取失败: {exc}")
+        return 1
     if not assignments:
         print("\n没有需要提醒的未交作业。")
         return 0
 
     print(f"\n--- 汇总结果：共 {len(assignments)} 项未交作业 ---")
-    notifier = EmailNotifier(config.sender_email, config.sender_auth_code, config.receiver_email)
     # TODO: Add a Qmsg notifier after implementing its API request.
     return 0 if notifier.Send(assignments) else 1
 
