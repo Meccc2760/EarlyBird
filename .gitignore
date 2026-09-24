@@ -1,8 +1,6 @@
-main_copy.py
-scraper_eg.py
-test.py
 __pycache__/
 *.pyc
 venv/
 .DS_Store
+
 /config.json

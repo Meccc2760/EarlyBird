@@ -1,9 +1,13 @@
 name: Gradescope Scraper
 
+permissions:
+  contents: read
+
 on:
   schedule:
-    # 北京时间 06:48、13:48、18:48 运行
-    - cron: '48 22,5,10 * * *'
+    # Beijing time: 06:55, 12:55, and 17:55 every day.
+    - cron: '55 6,12,17 * * *'
+      timezone: Asia/Shanghai
   workflow_dispatch: {}
 
 jobs:
@@ -11,10 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -30,5 +36,4 @@ jobs:
           MAIL_SEND: ${{ secrets.MAIL_SEND }}
           MAIL_AUTH_CODE: ${{ secrets.MAIL_AUTH_CODE }}
           MAIL_RECEIVE: ${{ secrets.MAIL_RECEIVE }}
-        run: |
-          python reminder.py
+        run: python reminder.py

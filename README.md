@@ -1,35 +1,57 @@
-# Gradescope 作业提醒
+# Early Bird Reminder
 
-`upgrade/reminder.py` 定时登录 Gradescope，查找尚未提交且未超过截止时间 24 小时的作业，并通过邮件提醒。只要作业仍符合条件，每次运行都会再次提醒；所有作业已提交时不发邮件。
+Early Bird avoids DDLs. 这个脚本会定期自动访问你的Gradescope账号，并整理汇总所有未提交的作业，然后发邮件提醒你。
+
+值得注意的是，只要存在未过期的unsubmitted assignment，脚本就会在每次auto run的时候给你发邮件。也就是说，一旦assignment released，只要你没有完成并submit，就会一直收到催命提醒邮件。在无穷无尽的骚扰下，你终于决定尽早完成assignment以免受骚扰。
+
+因此，这个脚本适用于习惯及时处理assignment的使用者，或者希望尽早获知assignment release的使用者，又或者是决心不再当ddl战士的使用者，它可以起到一个提醒和激励的作用。但它并不适合习惯于临近ddl才完成assignment的使用者，显然你会每天收到很多封提醒邮件。请诸位按需使用。
+
+> 可以在`workflow/scrape.yml`中修改发信时间和频率。
 
 ## 用 GitHub Actions 部署
 
-1. Fork 本仓库，在仓库的 `Settings → Secrets and variables → Actions` 添加以下四个 Repository secrets：
+1. Fork 本仓库。在你自己的仓库中打开 **Actions**，按页面提示启用工作流。GitHub 默认会禁用公开仓库 fork 中的定时工作流，因此请确认 **Gradescope Scraper** 处于启用状态。
+2. 打开 **Settings → Secrets and variables → Actions → Repository secrets**，添加下面四项：
 
-   | 名称 | 内容 |
+   | 名称 | 填写内容 |
    | --- | --- |
    | `GRADESCOPE_EMAIL` | Gradescope 登录邮箱 |
    | `GRADESCOPE_PASSWORD` | Gradescope 登录密码 |
-   | `MAIL_SEND` | 发件邮箱地址 |
-   | `MAIL_AUTH_CODE` | 发件邮箱的 SMTP 授权码或应用专用密码，不是 Gradescope 密码 |
+   | `MAIL_SEND` | 用来发送提醒的邮箱地址 |
+   | `MAIL_AUTH_CODE` | 发件邮箱的 SMTP 登录凭据，通常是客户端授权码或应用专用密码；不是 Gradescope 密码 |
 
-   默认将邮件发到 `GRADESCOPE_EMAIL`。如果要发往别的邮箱，再添加可选的 `MAIL_RECEIVE` secret。常见发件邮箱的 SMTP 主机和端口由脚本推断，无需填写。
+   收件邮箱默认是 `GRADESCOPE_EMAIL`。如果想发到其他地址，再添加可选的 `MAIL_RECEIVE` secret；收件邮箱不需要开启 SMTP。
 
-2. 在 `Actions → Gradescope Scraper` 中手动点击 `Run workflow`，检查本次运行结果。之后工作流按 [scrape.yml](.github/workflows/scrape.yml) 的计划执行；当前时间为北京时间 06:48、13:48、18:48。
+   > 发件邮箱需要允许第三方通过 SMTP 登录。QQ、Foxmail、163 邮箱可在邮箱设置中开启相应服务并取得授权码；Gmail 需要能够创建应用专用密码。Outlook.com、Hotmail.com 和 Live.com 当前不能用作发件邮箱。学校或公司邮箱是否能发信取决于管理员设置，本项目不保证支持；它们仍可作为收件邮箱。
 
-工作流执行的是 `python upgrade/reminder.py`。请勿将密码写进代码或提交到仓库。
+3. 在 **Actions → Gradescope Scraper → Run workflow** 手动运行一次。日志应显示登录成功、选中的学期和检查的课程数。（若没有未交作业，运行成功也不会发邮件）
+
+之后的工作流在北京时间每天 **06:55、12:55、17:55** 自动运行。要改时间，编辑 [scrape.yml](.github/workflows/scrape.yml) 中的 `schedule`。GitHub 的定时任务可能稍有延迟。
 
 ## 本地运行
 
-如果还没有 `config.json`，先执行 `cp config.example.json config.json` 并填入上述四项。已有配置文件时不要再次复制，以免覆盖原有凭据。安装依赖并运行脚本：
+在仓库根目录创建 `config.json`（如果已经有了，不必重建）：
 
-```sh
-python -m pip install -r requirements.txt
-python upgrade/reminder.py
+```json
+{
+  "GRADESCOPE_EMAIL": "your.name@school.edu",
+  "GRADESCOPE_PASSWORD": "your-gradescope-password",
+  "MAIL_SEND": "sender@qq.com",
+  "MAIL_AUTH_CODE": "your-smtp-auth-code"
+}
 ```
 
-`config.json` 已加入 `.gitignore`。也可以完全使用同名环境变量，不创建文件；环境变量优先于文件。`MAIL_RECEIVE` 可留空，默认使用 Gradescope 邮箱。如果配置文件存放在其他位置，可用 `REMINDER_CONFIG` 环境变量指定路径。
+在 macOS 或 Linux 上安装依赖并运行：
+
+```sh
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python reminder.py
+```
+
+`config.json` 已被 Git 忽略。你也可以使用同名环境变量，不创建文件；环境变量优先于文件。`MAIL_RECEIVE` 留空时默认使用 Gradescope 邮箱，`REMINDER_CONFIG` 可用于指定其他配置文件路径。
 
 ## English quick start
 
-Fork the repository and add four Actions secrets: `GRADESCOPE_EMAIL`, `GRADESCOPE_PASSWORD`, `MAIL_SEND`, and `MAIL_AUTH_CODE` (the sender mailbox's SMTP authorization code or app password). `MAIL_RECEIVE` is optional and defaults to the Gradescope email. Run the **Gradescope Scraper** workflow once manually to check the setup. For local use, copy `config.example.json` to the ignored `config.json` only if you do not already have one, fill in the same fields, and run `python upgrade/reminder.py`.
+Fork this repository, enable the workflow in **Actions**, and add four repository secrets: `GRADESCOPE_EMAIL`, `GRADESCOPE_PASSWORD`, `MAIL_SEND`, and `MAIL_AUTH_CODE` (the sender mailbox's SMTP credential, usually an app password). `MAIL_RECEIVE` is optional and defaults to the Gradescope email. Run **Gradescope Scraper** manually once; it checks only the newest term. Scheduled runs occur at 06:55, 12:55, and 17:55 in `Asia/Shanghai`. For local use, create an ignored `config.json` with the same fields and run `venv/bin/python reminder.py` after installing dependencies.
