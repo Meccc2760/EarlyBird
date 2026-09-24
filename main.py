@@ -351,7 +351,50 @@ def send_notification(assignments: list[dict[str, str]]) -> None:
                     server.close()
                 except Exception:
                     pass
+def send_qmsg_notification(assignments: list[dict[str, str]]) -> None:
+    """
+    通过 Qmsg 酱发送 QQ 通知。
+    """
+    qmsg_key = os.getenv("QMSG_KEY")
+    # 如果你想发送给特定 QQ（在后台绑定的多个 QQ 之一），可以设置这个环境变量
+    target_qq = os.getenv("QMSG_QQ") 
 
+    if not qmsg_key:
+        print("Error: QMSG_KEY environment variable is not set. Skipping QQ notification.")
+        return
+
+    if not assignments:
+        return
+
+    # 构造简短的 QQ 消息内容
+    msg_lines = [f"【Gradescope提醒】发现 {len(assignments)} 项未交作业："]
+    for i, a in enumerate(assignments, start=1):    
+        name = a.get("name", "未知作业")
+        due = a.get("due_date", "无截止日期")
+        msg_lines.append(f"{i}. {name}")
+        msg_lines.append(f"   截止: {due}")
+    
+    msg_content = "\n".join(msg_lines)
+
+    # Qmsg API URL
+    url = f"https://qmsg.zendee.cn/send/{qmsg_key}"
+    
+    data = {
+        "msg": msg_content
+    }
+    if target_qq:
+        data["qq"] = target_qq
+
+    try:
+        # 使用 requests 发送 POST 请求
+        response = requests.post(url, data=data, timeout=10)
+        result = response.json()
+        if result.get("code") == 0:
+            print("QQ notification sent successfully via Qmsg.")
+        else:
+            print(f"Failed to send QQ notification: {result.get('txt')}")
+    except Exception as e:
+        print(f"Error occurred while sending Qmsg: {e}")
 
 # --- 主程序入口 ---
 
@@ -417,5 +460,6 @@ if __name__ == "__main__":
 
                     # 打印全部条目后只发送一次邮件通知（避免重复发送）
                     send_notification(all_unsubmitted_assignments)
+                    send_qmsg_notification(all_unsubmitted_assignments)
         else:
             print("Login failed.")

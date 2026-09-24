@@ -1,55 +1,36 @@
-# Gradescope-scraper
-## What is it?
-Gradescope-scraper is a web crawler tool that could automatically fetch the submission status of homeworks released on Gradescope.
+# Gradescope 作业提醒
 
-## What does it do?
-- Automatically log into your gradescope account and check your homework submision status.
-- If all works done, it will stay silent.
-- If unsubmitted homework or newly-released homework detected, it will send a notification email to your box.
-- Gradescope-scraper runs automatically at 7:00, 14:00, 19:00 Beijing Time(UTC 23:00, 6:00, 11:00)
+`upgrade/reminder.py` 定时登录 Gradescope，查找尚未提交且未超过截止时间 24 小时的作业，并通过邮件提醒。只要作业仍符合条件，每次运行都会再次提醒；所有作业已提交时不发邮件。
 
-## How can you run it?
-- Fork it to your own repository.  
-- Turn to `Settings`->`Secrets and variables`->`Actions`->`New repository secret`, and input the following values:  
-`GRADESCOPE_EMAIL`: your Gradescope log-in email (e.g. your.name@school.edu).  
-`GRADESCOPE_PASSWORD`: your Gradescope password.  
-`SMTP_HOST`: The SMTP host for email services (e.g. QQ email is smtp.qq.com, Gmail needs to be configured separately).  
-`SMTP_PORT`: SMTP port (e.g. 465 for SSL, 587 for STARTTLS).  
-`SMTP_USER`: SMTP account (your posting email, maybe just your own QQ email).  
-`SMTP_PASSWORD`: SMTP authorization code/application-specific password (not the login password for the web version; for QQ email, the authorization code needs to be generated in "Account Settings -POP3/SMTP Service").  
-`SMTP_TO`: receiving email, could be your oft-used email.  
-`SMTP_FROM`: sending email, the same with your SMTP_USER email.  
-e.g. ![alt text](image1.png)
-- If you want to verify its accessibilty, turn to`Actions` on the top, choose`Gradescope Scraper` on the left and click`Run workflow`, then you can open the`run-scraper` and check the log.  
-![alt text](image2.png)
-![alt text](image3.png)
-- That's all it takes. It will send you emails whenever homeworks occur unsubmitted.
+## 用 GitHub Actions 部署
 
----
+1. Fork 本仓库，在仓库的 `Settings → Secrets and variables → Actions` 添加以下四个 Repository secrets：
 
-## 中文.ver
+   | 名称 | 内容 |
+   | --- | --- |
+   | `GRADESCOPE_EMAIL` | Gradescope 登录邮箱 |
+   | `GRADESCOPE_PASSWORD` | Gradescope 登录密码 |
+   | `MAIL_SEND` | 发件邮箱地址 |
+   | `MAIL_AUTH_CODE` | 发件邮箱的 SMTP 授权码或应用专用密码，不是 Gradescope 密码 |
 
-## 它是什么？
-Gradescope-scraper 是一个网页爬虫工具，用于自动获取 Gradescope 上作业的提交状态。
+   默认将邮件发到 `GRADESCOPE_EMAIL`。如果要发往别的邮箱，再添加可选的 `MAIL_RECEIVE` secret。常见发件邮箱的 SMTP 主机和端口由脚本推断，无需填写。
 
-## 它能做什么？
-- 自动登录你的 Gradescope 账户并检查作业提交状态。
-- 如果所有作业都已完成，将保持静默。
-- 如果检测到未提交作业或新发布的作业，会向你的邮箱发送通知。
-- 程序会在北京时间 7:00、14:00、19:00 自动运行（对应 UTC 23:00、6:00、11:00）。
+2. 在 `Actions → Gradescope Scraper` 中手动点击 `Run workflow`，检查本次运行结果。之后工作流按 [scrape.yml](.github/workflows/scrape.yml) 的计划执行；当前时间为北京时间 06:48、13:48、18:48。
 
-## 如何运行？
-- 先将它fork到你自己的仓库里。  
-- 打开仓库 `Settings` → `Secrets and variables` → `Actions` → `New repository secret`，填入如下值：  
-`GRADESCOPE_EMAIL`：你的 Gradescope 登录邮箱（例如 your.name@school.edu）。  
-`GRADESCOPE_PASSWORD`：你的 Gradescope 登录密码。  
-`SMTP_HOST`：邮件服务的 SMTP 主机（例如 QQ 邮箱为 smtp.qq.com；Gmail 需另行配置）。  
-`SMTP_PORT`：SMTP 端口（例如 SSL 用 465，STARTTLS 用 587）。  
-`SMTP_USER`：SMTP 账号（通常是你的发件邮箱地址，例如 你自己的QQ邮箱地址）。  
-`SMTP_PASSWORD`：SMTP 授权码/应用专用密码（不是网页端登录密码；QQ邮箱需要在“账户设置-POP3/SMTP 服务”里生成授权码）。  
-`SMTP_TO`：收件邮箱，可以是你常用的邮箱。  
-`SMTP_FROM`：发件邮箱，通常与 `SMTP_USER` 相同。  
-- 如需验证可用性：点击顶部 `Actions`，左侧选择 `Gradescope Scraper`，然后点击 `Run workflow`；接着打开 `run-scraper` 查看日志。  
-- 就是这样。当存在未提交作业时，它会给你发送提醒邮件。
+工作流执行的是 `python upgrade/reminder.py`。请勿将密码写进代码或提交到仓库。
 
-> 可以查看project_motivation以了解更多设计动机、编写流程和功能细节。
+## 本地运行
+
+安装依赖后，复制 `config.example.json` 为 `config.json`，填入上述四项，再运行脚本：
+
+```sh
+python -m pip install -r requirements.txt
+cp config.example.json config.json
+python upgrade/reminder.py
+```
+
+`config.json` 已加入 `.gitignore`。也可以完全使用同名环境变量，不创建文件；环境变量优先于文件。`MAIL_RECEIVE` 可留空，默认使用 Gradescope 邮箱。如果配置文件存放在其他位置，可用 `REMINDER_CONFIG` 环境变量指定路径。
+
+## English quick start
+
+Fork the repository and add four Actions secrets: `GRADESCOPE_EMAIL`, `GRADESCOPE_PASSWORD`, `MAIL_SEND`, and `MAIL_AUTH_CODE` (the sender mailbox's SMTP authorization code or app password). `MAIL_RECEIVE` is optional and defaults to the Gradescope email. Run the **Gradescope Scraper** workflow once manually to check the setup. For local use, copy `config.example.json` to the ignored `config.json`, fill in the same fields, and run `python upgrade/reminder.py`.
