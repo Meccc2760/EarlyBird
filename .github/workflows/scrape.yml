@@ -31,4 +31,4 @@ jobs:
           MAIL_AUTH_CODE: ${{ secrets.MAIL_AUTH_CODE }}
           MAIL_RECEIVE: ${{ secrets.MAIL_RECEIVE }}
         run: |
-          python upgrade/reminder.py
+          python reminder.py

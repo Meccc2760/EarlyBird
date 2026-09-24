@@ -21,11 +21,10 @@
 
 ## 本地运行
 
-安装依赖后，复制 `config.example.json` 为 `config.json`，填入上述四项，再运行脚本：
+如果还没有 `config.json`，先执行 `cp config.example.json config.json` 并填入上述四项。已有配置文件时不要再次复制，以免覆盖原有凭据。安装依赖并运行脚本：
 
 ```sh
 python -m pip install -r requirements.txt
-cp config.example.json config.json
 python upgrade/reminder.py
 ```
 
@@ -33,4 +32,4 @@ python upgrade/reminder.py
 
 ## English quick start
 
-Fork the repository and add four Actions secrets: `GRADESCOPE_EMAIL`, `GRADESCOPE_PASSWORD`, `MAIL_SEND`, and `MAIL_AUTH_CODE` (the sender mailbox's SMTP authorization code or app password). `MAIL_RECEIVE` is optional and defaults to the Gradescope email. Run the **Gradescope Scraper** workflow once manually to check the setup. For local use, copy `config.example.json` to the ignored `config.json`, fill in the same fields, and run `python upgrade/reminder.py`.
+Fork the repository and add four Actions secrets: `GRADESCOPE_EMAIL`, `GRADESCOPE_PASSWORD`, `MAIL_SEND`, and `MAIL_AUTH_CODE` (the sender mailbox's SMTP authorization code or app password). `MAIL_RECEIVE` is optional and defaults to the Gradescope email. Run the **Gradescope Scraper** workflow once manually to check the setup. For local use, copy `config.example.json` to the ignored `config.json` only if you do not already have one, fill in the same fields, and run `python upgrade/reminder.py`.
