@@ -1,2 +1,8 @@
-requests>=2.31,<3
-beautifulsoup4>=4.12,<5
+beautifulsoup4==4.14.3
+certifi==2026.1.4
+charset-normalizer==3.4.4
+idna==3.11
+requests==2.32.5
+soupsieve==2.8.3
+typing_extensions==4.15.0
+urllib3==2.6.3

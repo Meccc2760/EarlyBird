@@ -33,5 +33,7 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          QMSG_KEY: ${{ secrets.QMSG_KEY }}  # 添加这一行
+          QMSG_QQ: ${{ secrets.QMSG_QQ }}    # 添加这一行（如果有）
         run: |
           python main.py
