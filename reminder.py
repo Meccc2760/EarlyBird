@@ -61,14 +61,14 @@ class ReminderConfig:
 
 @dataclass
 class Assignment:
-    """A submission to remind about; due_date_dt is used for filtering."""
+    """An unsubmitted assignment with its regular deadline."""
 
     platform_name: str
     course_name: str
     assignment_name: str
     status: str
     due_date_str: str  # Text shown in the email.
-    due_date_dt: datetime | None  # Parsed deadline; unused by the current notifier.
+    due_date_dt: datetime | None  # Regular deadline; unused by the current notifier.
     url: str
 
 
@@ -243,7 +243,7 @@ class GradescopeScraper(PlatformScraper):
             href = link_tag.get("href") if link_tag else None
             assignment_url = f"{self.base_url}{href}" if isinstance(href, str) else course_url
             due_date_text = "N/A"
-            latest_due_date = None
+            due_date = None
             parsed_dates = []
 
             for time_tag in row.find_all("time", class_="submissionTimeChart--dueDate"):
@@ -257,14 +257,17 @@ class GradescopeScraper(PlatformScraper):
                     raise RuntimeError(f"无法解析作业截止时间: {date_string}") from exc
                 if parsed_date.tzinfo is None:
                     raise RuntimeError(f"作业截止时间缺少时区: {date_string}")
-                parsed_dates.append((parsed_date, time_tag.get_text(strip=True)))
+                parsed_dates.append((parsed_date, time_tag.get_text(" ", strip=True)))
 
             if parsed_dates:
-                # Gradescope may show both regular and late deadlines; use the latest one.
-                latest_due_date, due_date_text = max(parsed_dates, key=lambda item: item[0])
-                if len(parsed_dates) > 1:
-                    due_date_text += " (含 Late)"
-                if now > latest_due_date + timedelta(hours=24):
+                # Both deadlines share a CSS class; the late deadline has a text label.
+                regular_dates = [item for item in parsed_dates if not re.search(r"\blate\s+due\s+date\s*:", item[1], re.IGNORECASE)]
+                if len(regular_dates) != 1:
+                    raise RuntimeError(f"无法唯一识别作业的正式截止时间: {course_url}")
+                due_date, due_date_text = regular_dates[0]
+                # Keep reminders until 24 hours after the final submission deadline.
+                submission_close_date = max(item[0] for item in parsed_dates)
+                if now > submission_close_date + timedelta(hours=24):
                     continue
 
             unsubmitted_assignments.append(Assignment(
@@ -273,7 +276,7 @@ class GradescopeScraper(PlatformScraper):
                 assignment_name=name_tag.get_text(strip=True),
                 status=status_text,
                 due_date_str=due_date_text,
-                due_date_dt=latest_due_date,
+                due_date_dt=due_date,
                 url=assignment_url,
             ))
 
